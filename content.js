@@ -4,6 +4,7 @@ console.log('Content script loaded');
 // Create a variable to track overlay state
 let overlayActive = false;
 let overlayElement = null;
+let lastHighlightedElement = null; // Keep track of the last highlighted element
 
 // Variables for speed reader
 let speedReaderCanvas;
@@ -20,6 +21,7 @@ let startButton;
 let pauseResumeButton;  // Renamed from stopButton
 let readingProgress;
 let extractedWords = []; // Store extracted words for navigation
+let extractedWordElements = []; // Store the source elements for each word
 let isDraggingProgress = false; // Track if user is dragging the scrollbar
 
 // Create the overlay element
@@ -134,12 +136,14 @@ function createOverlay() {
 
 // Remove the overlay
 function removeOverlay() {
-  if (overlayElement && overlayElement.parentNode) {
-    // Stop any ongoing reading
+  if (overlayElement && overlayElement.parentNode) {    // Stop any ongoing reading
     stopf();
     
     // Remove wheel event listener
     document.removeEventListener('wheel', preventScrolling, { passive: false, capture: true });
+    
+    // Clear any element highlighting
+    clearAllHighlights();
     
     // Reset variables
     currentCounter = 0;
@@ -161,8 +165,12 @@ function removeOverlay() {
     pauseResumeButton = null;
     readingProgress = null;
     extractedWords = [];
+    extractedWordElements = [];
     isDraggingProgress = false;
     isPaused = false;
+    
+    // Clear all highlights
+    clearAllHighlights();
   }
 }
 
@@ -215,8 +223,7 @@ function initSpeedReader() {
   // Add event listeners to buttons
   startButton.addEventListener('click', startOrRestart);
   pauseResumeButton.addEventListener('click', togglePauseResume);
-  
-  // Add event listeners for the scrollbar
+    // Add event listeners for the scrollbar
   readingProgress.addEventListener('mousedown', function() {
     isDraggingProgress = true;
     // Stop reading if currently in progress
@@ -224,13 +231,34 @@ function initSpeedReader() {
       stopf();
     }
   });
-  
-  readingProgress.addEventListener('input', function() {
+    readingProgress.addEventListener('input', function() {
     if (extractedWords.length > 0) {
       // Only update position display while dragging, without starting reading
       const newPosition = Math.floor((readingProgress.value / 100) * extractedWords.length);
+      
+      // Store the current position temporarily to allow smooth scrolling
+      // during manual progress bar interaction
+      const previousCounter = currentCounter;
+      currentCounter = newPosition;
+      
       // Display current word without starting reading
       displayWordAtPosition(newPosition);
+      
+    // Also scroll to the corresponding element to sync the page position
+      if (extractedWordElements && extractedWordElements[newPosition]) {
+        // When dragging the progress bar, we want to calculate the exact position within the element
+        // based on the word's position in the element's content
+        const currentElement = extractedWordElements[newPosition];
+        
+        // Calculate the exact position for smooth progression
+        scrollToElement(currentElement);
+      }
+      
+      // Restore the counter if we're not actually changing the reading position yet
+      // (this happens on mouseup)
+      if (isDraggingProgress) {
+        currentCounter = previousCounter;
+      }
     }
   });
   
@@ -291,12 +319,20 @@ function delayPrintWord(words) {
   speedReaderCtx.fillStyle = "#000000";
   speedReaderCtx.fillText(splitWord[0], 170 - sizeORP / 2 - sizeLeft, 45);
   speedReaderCtx.fillText(splitWord[2], 170 + sizeORP / 2, 45);
-  
-  // Update scrollbar position only if user is not currently dragging it
+    // Update scrollbar position only if user is not currently dragging it
   if (!isDraggingProgress && readingProgress) {
     const progressPercentage = Math.floor((currentCounter / words.length) * 100);
     readingProgress.value = progressPercentage;
   }
+  
+  // Scroll the page to the current element if available
+  if (extractedWordElements && extractedWordElements[currentCounter]) {
+    // Pass the current word index to help calculate relative position
+    scrollToElement(extractedWordElements[currentCounter]);
+  }
+  
+  // Highlight the current element
+  highlightCurrentElement(extractedWordElements[currentCounter]);
   
   currentCounter = currentCounter + 1;
   if (currentCounter >= words.length || stop == true) {
@@ -319,28 +355,36 @@ function extractPageText() {
   const textElements = document.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, td, th, span, div');
   let text = '';
   
+  // Reset the arrays
+  extractedWords = [];
+  extractedWordElements = [];
+  
   // Extract text from each element
   textElements.forEach(element => {
     // Skip hidden elements and elements inside our overlay
     if (element.offsetParent !== null && !overlayElement.contains(element)) {
       const elementText = element.innerText || element.textContent;
       if (elementText && elementText.trim()) {
+        // Split the element's text into words
+        const elementWords = elementText
+          .replace(/[\r\n]+/g, ' ') // Replace line breaks with spaces
+          .replace(/\s+/g, ' ')     // Normalize spaces
+          .trim()                   // Remove leading/trailing spaces
+          .split(/\s+/);            // Split into words
+          
+        // Add each word to our arrays, tracking its source element
+        elementWords.forEach(word => {
+          extractedWords.push(word);
+          extractedWordElements.push(element);
+        });
+        
+        // Add a space between elements
         text += elementText + ' ';
       }
     }
   });
   
-  // Clean up the text and split into words
-  const words = text
-    .replace(/[\r\n]+/g, ' ') // Replace line breaks with spaces
-    .replace(/\s+/g, ' ')     // Normalize spaces
-    .trim()                   // Remove leading/trailing spaces
-    .split(/\s+/);            // Split into words
-  
-  // Store the extracted words for navigation
-  extractedWords = words;
-  
-  return words;
+  return extractedWords;
 }
 
 // Start function with implemented TODO
@@ -560,6 +604,98 @@ function togglePauseResume() {
       speedA = 60000 / speedInput.value;
       delayPrintWord(extractedWords);
     }
+  }
+}
+
+// Function to determine optimal scroll behavior based on reading speed
+function getOptimalScrollBehavior() {
+  // If reading very fast (above 700 WPM), use 'auto' to avoid scroll lag
+  // Otherwise use 'smooth' for better user experience
+  const currentSpeed = parseInt(speedInput?.value || 500);
+  return currentSpeed > 700 ? 'auto' : 'smooth';
+}
+
+// Function to scroll page to the element containing the current word
+function scrollToElement(element) {
+  if (!element || !overlayActive) return;
+  
+  // Calculate the element's position
+  const rect = element.getBoundingClientRect();
+  const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+  
+  // Calculate the element's position relative to the page
+  const elementTop = rect.top + scrollTop;
+  const elementHeight = rect.height;
+  const elementBottom = elementTop + elementHeight;
+  
+  // Calculate what percentage through the current element's words we are
+  const elementFirstWordIndex = extractedWordElements.findIndex(el => el === element);
+  if (elementFirstWordIndex === -1) return;
+  
+  // Find the last word index that belongs to this element
+  let elementLastWordIndex = extractedWordElements.lastIndexOf(element);
+  if (elementLastWordIndex === -1) return;
+  
+  // Calculate progress within this element (0 to 1)
+  let progressThroughElement = 0;
+  
+  // Only calculate progress if there are multiple words in this element
+  if (elementLastWordIndex > elementFirstWordIndex) {
+    const wordsInElement = elementLastWordIndex - elementFirstWordIndex + 1;
+    const currentWordInElement = currentCounter - elementFirstWordIndex;
+    progressThroughElement = Math.max(0, Math.min(1, currentWordInElement / wordsInElement));
+  }
+  
+  // Calculate a smooth scroll position that progresses from top to bottom of the element
+  const windowHeight = window.innerHeight || document.documentElement.clientHeight;
+  const baseOffset = windowHeight / 3; // Element starts 1/3 from the top
+  
+  // Calculate the scrolling range within the element
+  const scrollRangeStart = elementTop - baseOffset; // Start with element at 1/3 from top
+  const scrollRangeEnd = elementBottom - baseOffset; // End with element bottom at 1/3 from top
+  
+  // Calculate target position based on progress through the element
+  const targetPosition = scrollRangeStart + (progressThroughElement * (scrollRangeEnd - scrollRangeStart));
+    // Highlight the current element to make it easy to follow
+  highlightCurrentElement(element);
+  
+  // Apply scrolling with optimal behavior based on reading speed
+  window.scrollTo({
+    top: targetPosition,
+    behavior: getOptimalScrollBehavior()
+  });
+}
+
+// Function to highlight the current element being read
+function highlightCurrentElement(element) {
+  // Remove highlight from previous element if it exists
+  if (lastHighlightedElement && lastHighlightedElement !== element) {
+    lastHighlightedElement.style.removeProperty('background-color');
+    lastHighlightedElement.style.removeProperty('transition');
+  }
+  
+  // If the element is the same, no need to highlight again
+  if (element && element !== lastHighlightedElement) {
+    // Store the original background color if not already stored
+    if (!element.dataset.originalBackgroundColor) {
+      element.dataset.originalBackgroundColor = window.getComputedStyle(element).backgroundColor;
+    }
+    
+    // Apply a subtle highlight
+    element.style.backgroundColor = 'rgba(66, 133, 244, 0.1)';
+    element.style.transition = 'background-color 0.3s ease';
+    
+    // Update the last highlighted element
+    lastHighlightedElement = element;
+  }
+}
+
+// Function to clear all highlighting when removing the overlay
+function clearAllHighlights() {
+  if (lastHighlightedElement) {
+    lastHighlightedElement.style.removeProperty('background-color');
+    lastHighlightedElement.style.removeProperty('transition');
+    lastHighlightedElement = null;
   }
 }
 
