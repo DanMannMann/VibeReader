@@ -8,6 +8,25 @@ chrome.runtime.onInstalled.addListener(function() {
     counter: 0,
     overlayActive: false
   });
+  
+  // Create context menu items
+  chrome.contextMenus.create({
+    id: "openVibeReader",
+    title: "Open Vibe Reader",
+    contexts: ["page"]
+  });
+  
+  chrome.contextMenus.create({
+    id: "readWithVibeReader",
+    title: "Read with Vibe Reader",
+    contexts: ["selection"]
+  });
+  
+  chrome.contextMenus.create({
+    id: "readFromHere",
+    title: "Start reading from here",
+    contexts: ["all"]
+  });
 });
 
 // Listen for messages from the popup or content scripts
@@ -39,7 +58,47 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
       }
     });
   }
-  
-  // Required for async sendResponse
+    // Required for async sendResponse
   return true;
+});
+
+// Handle context menu clicks
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === "openVibeReader") {
+    // Send message to the active tab to open the reader
+    chrome.tabs.sendMessage(tab.id, { action: 'toggleOverlay' }, function(response) {
+      if (response) {
+        chrome.storage.sync.set({ overlayActive: response.overlayActive });
+      }
+    });
+  } else if (info.menuItemId === "readWithVibeReader") {
+    // Send message to read the selected text
+    chrome.tabs.sendMessage(tab.id, { 
+      action: 'toggleOverlay',
+      useSelection: true
+    }, function(response) {
+      if (response) {
+        chrome.storage.sync.set({ overlayActive: response.overlayActive });
+      }
+    });  } else if (info.menuItemId === "readFromHere") {
+    // Send message to start reading from the clicked position
+    chrome.tabs.sendMessage(tab.id, { 
+      action: 'toggleOverlay',
+      startFromClick: true,
+      targetElementInfo: {
+        nodeName: info.targetNodeName,
+        linkUrl: info.linkUrl,
+        srcUrl: info.srcUrl,
+        pageUrl: info.pageUrl,
+        frameId: info.frameId,
+        frameUrl: info.frameUrl,
+        selectionText: info.selectionText,
+        mediaType: info.mediaType
+      }
+    }, function(response) {
+      if (response) {
+        chrome.storage.sync.set({ overlayActive: response.overlayActive });
+      }
+    });
+  }
 });

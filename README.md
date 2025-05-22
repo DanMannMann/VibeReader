@@ -1,6 +1,6 @@
-# Chrome Extension Boilerplate
+# Vibe Reader Chrome Extension
 
-A basic Chrome extension boilerplate with all the necessary files to get started.
+A speed reading Chrome extension that enhances your reading experience with a clean, focused interface.
 
 ## Structure
 
@@ -14,9 +14,13 @@ A basic Chrome extension boilerplate with all the necessary files to get started
 
 - Translucent overlay with blur effect that can be toggled on any web page
 - The overlay creates a "frosted glass" effect over the entire page content
-- Built-in Speed Reader that helps you read page content faster
+- Built-in Vibe Reader that helps you read page content faster
 - Automatically extracts and processes text from the current page
 - Configurable reading speed (WPM) and pause timings for punctuation
+- Context menu integration for easy access from any page
+- Read selected text by right-clicking on a selection
+- Start reading from any position by right-clicking and selecting "Start reading from here"
+- Auto-scrolling feature that can be toggled on/off
 
 ## Icon Requirements
 
@@ -35,7 +39,11 @@ You'll need to add icon files in the `images/` directory:
 
 ## Usage
 
-Click on the extension icon in the Chrome toolbar to open the popup interface.
+- Click on the extension icon in the Chrome toolbar to open the popup interface
+- Right-click anywhere on a page and select "Open Vibe Reader" to start reading from the beginning
+- Right-click on a text selection and choose "Read with Vibe Reader" to read only the selected text
+- Right-click anywhere on the page and select "Start reading from here" to begin reading from that position
+- Use the checkbox in the overlay to toggle auto-scrolling on/off
 
 ## Features
 

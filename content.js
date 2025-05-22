@@ -5,6 +5,7 @@ console.log('Content script loaded');
 let overlayActive = false;
 let overlayElement = null;
 let lastHighlightedElement = null; // Keep track of the last highlighted element
+let userSelection = null; // Track user's text selection when overlay is opened
 
 // Variables for speed reader
 let speedReaderCanvas;
@@ -23,9 +24,13 @@ let readingProgress;
 let extractedWords = []; // Store extracted words for navigation
 let extractedWordElements = []; // Store the source elements for each word
 let isDraggingProgress = false; // Track if user is dragging the scrollbar
+let autoScroll = true; // Track if auto-scrolling is enabled
 
 // Create the overlay element
 function createOverlay() {
+  // Capture user selection before creating overlay
+  userSelection = window.getSelection();
+  
   // Create overlay div
   overlayElement = document.createElement('div');
   overlayElement.id = 'chrome-extension-overlay';
@@ -59,26 +64,25 @@ function createOverlay() {
     max-width: 800px;
     margin-bottom: 20px;
   `;
-  
-  // Add the HTML content from example.html
+    // Add the HTML content from example.html
   readerContainer.innerHTML = `
-    <h2 style="text-align: center; margin-bottom: 20px; color: #202124;">Speed Reader</h2>
-    <div id="controls" style="margin-bottom: 20px;">
-      <div style="margin-bottom: 15px; display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between;">
-        <div style="display: flex; align-items: center; flex: 3;">
-          <label style="margin-right: 10px; white-space: nowrap;">Speed(WPM): <input type="text" value="500" size="4" id="speedInput" style="padding: 5px; width: 50px;"></label>
+    <h2 style="text-align: center; margin-bottom: 20px; color: #202124;">Vibe Reader</h2>
+    <div id="controls" style="margin-bottom: 20px;">      <div style="margin-bottom: 15px; display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between;">
+        <div style="display: flex; align-items: center; flex: 3;">          <label style="margin-right: 10px; white-space: nowrap;">Speed(WPM): <input type="text" value="500" size="4" id="speedInput" style="padding: 5px; width: 50px;"></label>
           <label style="margin-right: 10px; white-space: nowrap;">Pause for full stop: <input type="text" value="1.5" size="4" id="fullStopInput" style="padding: 5px; width: 50px;"></label>
-          <label style="white-space: nowrap;">Pause for comma: <input type="text" value="0.5" size="4" id="commaInput" style="padding: 5px; width: 50px;"></label>
+          <label style="margin-right: 10px; white-space: nowrap;">Pause for comma: <input type="text" value="0.5" size="4" id="commaInput" style="padding: 5px; width: 50px;"></label>
         </div>
         <div style="display: flex; align-items: center; flex: 1; justify-content: flex-end;">
           <input type="button" value="Start" id="startButton" style="margin-right: 10px; padding: 8px 16px; background-color: #4285f4; color: white; border: none; border-radius: 4px; cursor: pointer;"/>
           <input type="button" value="Pause" id="pauseResumeButton" style="padding: 8px 16px; background-color: #ea4335; color: white; border: none; border-radius: 4px; cursor: pointer;"/>
         </div>
-      </div>
-      <div id="readingArea" style="border: 1px solid #e0e0e0; min-height: 80px; padding: 10px; margin-top: 10px; display: flex; flex-direction: column; align-items: center;">
+      </div>      <div id="readingArea" style="border: 1px solid #e0e0e0; min-height: 80px; padding: 10px; margin-top: 10px; display: flex; flex-direction: column; align-items: center;">
         <div id="canvasContainer" style="width: 100%; display: flex; justify-content: center;"></div>
         <div id="progressContainer" style="width: 95%; margin-top: 10px; display: flex; align-items: center;">
           <input type="range" id="readingProgress" min="0" max="100" value="0" style="width: 100%; height: 10px;">
+        </div>
+        <div style="width: 95%; margin-top: 5px; display: flex; justify-content: flex-end;">
+          <label style="white-space: nowrap; font-size: 14px;"><input type="checkbox" id="autoScrollCheckbox" checked style="margin-right: 5px;">Auto-scroll</label>
         </div>
       </div>
     </div>
@@ -163,11 +167,12 @@ function removeOverlay() {
     commaInput = null;
     startButton = null;
     pauseResumeButton = null;
-    readingProgress = null;
-    extractedWords = [];
+    readingProgress = null;    extractedWords = [];
     extractedWordElements = [];
     isDraggingProgress = false;
     isPaused = false;
+    autoScroll = true; // Reset auto-scroll to default (enabled)
+    userSelection = null; // Clear the selection reference
     
     // Clear all highlights
     clearAllHighlights();
@@ -184,14 +189,22 @@ function toggleOverlay() {
 }
 
 // Initialize speed reader functionality
-function initSpeedReader() {
-  // Get references to all the input elements
+function initSpeedReader() {  // Get references to all the input elements
   speedInput = document.getElementById("speedInput");
   fullStopInput = document.getElementById("fullStopInput");
   commaInput = document.getElementById("commaInput");
   startButton = document.getElementById("startButton");
   pauseResumeButton = document.getElementById("pauseResumeButton");
   readingProgress = document.getElementById("readingProgress");
+  const autoScrollCheckbox = document.getElementById("autoScrollCheckbox");
+  
+  // Initialize auto-scroll checkbox and add event listener
+  if (autoScrollCheckbox) {
+    autoScrollCheckbox.checked = autoScroll;
+    autoScrollCheckbox.addEventListener('change', function() {
+      autoScroll = this.checked;
+    });
+  }
   
   // Create canvas for speed reader
   speedReaderCanvas = document.createElement("canvas");
@@ -324,15 +337,13 @@ function delayPrintWord(words) {
     const progressPercentage = Math.floor((currentCounter / words.length) * 100);
     readingProgress.value = progressPercentage;
   }
-  
-  // Scroll the page to the current element if available
+    // Always highlight the current element regardless of auto-scroll setting
   if (extractedWordElements && extractedWordElements[currentCounter]) {
-    // Pass the current word index to help calculate relative position
+    highlightCurrentElement(extractedWordElements[currentCounter]);
+    
+    // Scroll the page to the current element if auto-scroll is enabled
     scrollToElement(extractedWordElements[currentCounter]);
   }
-  
-  // Highlight the current element
-  highlightCurrentElement(extractedWordElements[currentCounter]);
   
   currentCounter = currentCounter + 1;
   if (currentCounter >= words.length || stop == true) {
@@ -349,15 +360,92 @@ function delayPrintWord(words) {
 
 
 
-// Implementing the TODO: Extract text from the current page
+// Extract text from the current page or from user selection
 function extractPageText() {
-  // Get all text nodes from the body
-  const textElements = document.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, td, th, span, div');
-  let text = '';
-  
   // Reset the arrays
   extractedWords = [];
   extractedWordElements = [];
+    // Check if we have a valid user selection
+  if (userSelection && !userSelection.isCollapsed && userSelection.toString().trim()) {
+    // Process selected text
+    const selectedText = userSelection.toString().trim();
+    
+    // If there's only selected text, use that
+    if (selectedText) {
+      console.log('Reading from selection:', selectedText);
+      
+      // Get the range information
+      const range = userSelection.getRangeAt(0);
+      const selectionContainer = range.commonAncestorContainer;
+      
+      // Get parent element if the selection is just a text node
+      const containerElement = selectionContainer.nodeType === 3 ? 
+                              selectionContainer.parentElement : selectionContainer;
+      
+      // Split the selected text into words
+      const selectedWords = selectedText
+        .replace(/[\r\n]+/g, ' ') // Replace line breaks with spaces
+        .replace(/\s+/g, ' ')     // Normalize spaces
+        .trim()                   // Remove leading/trailing spaces
+        .split(/\s+/);            // Split into words
+      
+      // Handle the case where selection crosses multiple elements
+      if (selectedWords.length > 0) {
+        // If the selection is inside a single element, use that for all words
+        if (range.startContainer === range.endContainer || 
+            (range.startContainer.parentNode === range.endContainer.parentNode)) {
+          
+          // Add selected words to our arrays with the same container
+          selectedWords.forEach(word => {
+            extractedWords.push(word);
+            extractedWordElements.push(containerElement);
+          });
+        } else {
+          // For selections spanning multiple elements, we need to find each element
+          // This is a simplified approach that might not be perfect for all cases
+          const textElements = document.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, td, th, span, div');
+          let elementsInRange = [];
+          
+          // Find elements that are within or intersect with our selection range
+          textElements.forEach(element => {
+            if (!overlayElement.contains(element) && 
+                element.offsetParent !== null &&
+                range.intersectsNode(element)) {
+              elementsInRange.push(element);
+            }
+          });
+          
+          // If we found elements in range, distribute words among them
+          if (elementsInRange.length > 0) {
+            let wordIndex = 0;
+            const wordsPerElement = Math.ceil(selectedWords.length / elementsInRange.length);
+            
+            elementsInRange.forEach(element => {
+              const elementWordCount = Math.min(wordsPerElement, selectedWords.length - wordIndex);
+              
+              for (let i = 0; i < elementWordCount && wordIndex < selectedWords.length; i++) {
+                extractedWords.push(selectedWords[wordIndex]);
+                extractedWordElements.push(element);
+                wordIndex++;
+              }
+            });
+          } else {
+            // Fallback to using the common ancestor
+            selectedWords.forEach(word => {
+              extractedWords.push(word);
+              extractedWordElements.push(containerElement);
+            });
+          }
+        }
+      }
+      
+      return extractedWords;
+    }
+  }
+  
+  // If no valid selection, extract text from the whole page
+  const textElements = document.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, td, th, span, div');
+  let text = '';
   
   // Extract text from each element
   textElements.forEach(element => {
@@ -389,7 +477,7 @@ function extractPageText() {
 
 // Start function with implemented TODO
 function start() {
-  // Extract words from the page content
+  // Extract words from the page content or selection
   const words = extractPageText();
   
   // If no words were found, show a message
@@ -400,11 +488,68 @@ function start() {
   
   stopf();
   speedA = 60000 / speedInput.value;
-  currentCounter = 0;
   
-  // Reset the progress slider
+  // Set the starting position
+  currentCounter = 0;
+    // If we're using the full page text but have a selection, find and start from that selection
+  if (userSelection && !userSelection.isCollapsed && userSelection.toString().trim()) {
+    const selectedText = userSelection.toString().trim();
+    
+    // If we're not reading only the selection (i.e., using the full page text)
+    // Find where in the full text our selection begins
+    if (words.length > selectedText.split(/\s+/).length) {
+      const firstSelectedWord = selectedText.split(/\s+/)[0];
+      
+      // Try to find the index of the first selected word
+      let startIndex = -1;
+      
+      // First attempt: exact match
+      startIndex = words.findIndex(word => 
+        word.toLowerCase().replace(/[^\w]/g, '') === 
+        firstSelectedWord.toLowerCase().replace(/[^\w]/g, '')
+      );
+      
+      // Second attempt: partial match (for cases where selection starts mid-word)
+      if (startIndex === -1) {
+        for (let i = 0; i < words.length; i++) {
+          if (doesSelectionContainWord(userSelection, words[i])) {
+            startIndex = i;
+            break;
+          }
+        }
+      }
+      
+      // Third attempt: look for consecutive words from the selection
+      if (startIndex === -1 && selectedText.split(/\s+/).length > 1) {
+        const firstTwoWords = selectedText.split(/\s+/).slice(0, 2).join(' ').toLowerCase();
+        
+        for (let i = 0; i < words.length - 1; i++) {
+          const twoWordsFromText = (words[i] + ' ' + words[i+1]).toLowerCase();
+          if (twoWordsFromText.includes(firstTwoWords) || firstTwoWords.includes(twoWordsFromText)) {
+            startIndex = i;
+            break;
+          }
+        }
+      }
+      
+      if (startIndex !== -1) {
+        console.log(`Starting from selected word at index ${startIndex}: "${words[startIndex]}"`);
+        currentCounter = startIndex;
+      }
+    }
+  }
+    // Update the progress slider to reflect the starting position
   if (readingProgress) {
-    readingProgress.value = 0;
+    const progressPercentage = Math.floor((currentCounter / words.length) * 100);
+    readingProgress.value = progressPercentage;
+  }
+  
+  // If we're reading a selection only, update the UI to reflect this
+  if (userSelection && !userSelection.isCollapsed && words.length === userSelection.toString().trim().split(/\s+/).length) {
+    // Change the start button label to indicate we're reading a selection
+    if (startButton) {
+      startButton.value = "Read Selection";
+    }
   }
   
   delayPrintWord(words);
@@ -447,8 +592,18 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
       }
     }, 3000);
   }
-  
-  if (request.action === 'toggleOverlay') {
+    if (request.action === 'toggleOverlay') {
+    // If request comes from context menu selection
+    if (request.useSelection && !overlayActive) {
+      // Capture the current selection before opening the overlay
+      userSelection = window.getSelection();
+    }
+      // If request comes from right-click "Start reading from here"
+    if (request.startFromClick && !overlayActive) {
+      // Create a custom selection based on the clicked element information
+      createSelectionFromClick(request.targetElementInfo);
+    }
+    
     toggleOverlay();
     sendResponse({ status: 'success', overlayActive });
   }
@@ -617,7 +772,7 @@ function getOptimalScrollBehavior() {
 
 // Function to scroll page to the element containing the current word
 function scrollToElement(element) {
-  if (!element || !overlayActive) return;
+  if (!element || !overlayActive || !autoScroll) return;
   
   // Calculate the element's position
   const rect = element.getBoundingClientRect();
@@ -653,11 +808,8 @@ function scrollToElement(element) {
   // Calculate the scrolling range within the element
   const scrollRangeStart = elementTop - baseOffset; // Start with element at 1/3 from top
   const scrollRangeEnd = elementBottom - baseOffset; // End with element bottom at 1/3 from top
-  
-  // Calculate target position based on progress through the element
+    // Calculate target position based on progress through the element
   const targetPosition = scrollRangeStart + (progressThroughElement * (scrollRangeEnd - scrollRangeStart));
-    // Highlight the current element to make it easy to follow
-  highlightCurrentElement(element);
   
   // Apply scrolling with optimal behavior based on reading speed
   window.scrollTo({
@@ -697,6 +849,253 @@ function clearAllHighlights() {
     lastHighlightedElement.style.removeProperty('transition');
     lastHighlightedElement = null;
   }
+}
+
+// Helper function to check if a selection contains a specific word
+function doesSelectionContainWord(selection, word) {
+  if (!selection || selection.isCollapsed) return false;
+  
+  const selectionText = selection.toString().toLowerCase();
+  const normalizedWord = word.toLowerCase().replace(/[^\w]/g, '');
+  
+  // Check for exact match
+  if (selectionText.includes(word.toLowerCase())) return true;
+  
+  // Check for match without punctuation
+  if (selectionText.replace(/[^\w\s]/g, '').includes(normalizedWord)) return true;
+  
+  // Check for partial match (beginning of selection might start mid-word)
+  const words = selectionText.split(/\s+/);
+  return words.some(w => 
+    w.replace(/[^\w]/g, '').includes(normalizedWord) || 
+    normalizedWord.includes(w.replace(/[^\w]/g, ''))
+  );
+}
+
+// Function to create a selection from context menu click information
+function createSelectionFromClick(targetInfo) {
+  console.log("Creating selection from context menu click:", targetInfo);
+  
+  // Try to find a relevant element based on context menu info
+  let element = null;
+  
+  // If there's a selection text, use the current selection
+  if (targetInfo.selectionText) {
+    console.log("Using existing selection text:", targetInfo.selectionText);
+    userSelection = window.getSelection();
+    return; // We already have a selection, no need to create one
+  }
+  
+  // Look for elements that match our context info
+  if (targetInfo.linkUrl) {
+    // If clicked on a link, find the link element
+    element = findElementByAttribute('a', 'href', targetInfo.linkUrl);
+  } else if (targetInfo.srcUrl) {
+    // If clicked on an image/media, find the media element
+    element = findElementByAttribute('img,video,audio', 'src', targetInfo.srcUrl);
+  }
+  
+  // If we still don't have an element, try to find a text element near the click
+  if (!element || !element.innerText) {
+    element = findTextElementAtPosition();
+  }
+  
+  // If we found an element with text content
+  if (element && (element.innerText || element.textContent)) {
+    // Create a new range and selection
+    const range = document.createRange();
+    const sel = window.getSelection();
+    
+    // Use the clicked element as the starting point
+    try {
+      // Try to set the range to start at the beginning of the text node
+      // closest to the click position
+      const clickedNode = findTextNodeAtPoint(clientX, clientY, element);
+      
+      if (clickedNode) {
+        // Try to find the word closest to the click
+        const { node, offset } = findClosestWordToPoint(clickedNode, clientX, clientY);
+        
+        if (node) {
+          // Set the range to encompass just the clicked word, if possible
+          const wordBoundary = findWordBoundary(node, offset);
+          
+          if (wordBoundary) {
+            range.setStart(node, wordBoundary.start);
+            range.setEnd(node, wordBoundary.end);
+          } else {
+            // Fall back to selecting the entire text node
+            range.selectNodeContents(node);
+          }
+          
+          // Clear the current selection and add our new range
+          sel.removeAllRanges();
+          sel.addRange(range);
+          
+          // Store the selection
+          userSelection = sel;
+          console.log("Created selection from click:", sel.toString());
+        } else {
+          // If we couldn't get a precise word, select the entire element
+          range.selectNodeContents(element);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          userSelection = sel;
+        }
+      } else {
+        // Fall back to selecting the entire element
+        range.selectNodeContents(element);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        userSelection = sel;
+      }
+    } catch (e) {
+      console.error("Error creating selection from click:", e);
+      
+      // Fall back to selecting the entire element
+      try {
+        range.selectNodeContents(element);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        userSelection = sel;
+      } catch (e2) {
+        console.error("Fallback selection also failed:", e2);
+      }
+    }
+  }
+}
+
+// Helper function to find a text node at a specific point
+function findTextNodeAtPoint(x, y, element) {
+  // Check if this element is a text node
+  if (element.nodeType === Node.TEXT_NODE) {
+    return element;
+  }
+  
+  // Check all child nodes
+  const children = element.childNodes;
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    
+    // If this is a text node, it might be the one we want
+    if (child.nodeType === Node.TEXT_NODE && child.textContent.trim()) {
+      return child;
+    }
+    
+    // If this is an element node, check if it contains the point
+    if (child.nodeType === Node.ELEMENT_NODE) {
+      const rect = child.getBoundingClientRect();
+      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+        // Recursively search this element
+        const result = findTextNodeAtPoint(x, y, child);
+        if (result) {
+          return result;
+        }
+      }
+    }
+  }
+  
+  // If we reach here and this element has text content but no good child match,
+  // return the first text node child
+  for (let i = 0; i < children.length; i++) {
+    if (children[i].nodeType === Node.TEXT_NODE && children[i].textContent.trim()) {
+      return children[i];
+    }
+  }
+  
+  return null;
+}
+
+// Helper function to find the closest word to a point in a text node
+function findClosestWordToPoint(textNode, x, y) {
+  const range = document.createRange();
+  const text = textNode.textContent;
+  let bestDistance = Infinity;
+  let bestOffset = 0;
+  let bestNode = textNode;
+  
+  // Check each character position to find the one closest to the click
+  for (let i = 0; i < text.length; i++) {
+    try {
+      range.setStart(textNode, i);
+      range.setEnd(textNode, i + 1);
+      
+      const rect = range.getBoundingClientRect();
+      const distance = Math.sqrt(
+        Math.pow(x - ((rect.left + rect.right) / 2), 2) + 
+        Math.pow(y - ((rect.top + rect.bottom) / 2), 2)
+      );
+      
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestOffset = i;
+        bestNode = textNode;
+      }
+    } catch (e) {
+      // Skip any errors and continue
+      continue;
+    }
+  }
+  
+  return { node: bestNode, offset: bestOffset };
+}
+
+// Helper function to find the start/end offsets of a word given a position within it
+function findWordBoundary(textNode, offset) {
+  const text = textNode.textContent;
+  
+  // If we're at the end, use the full text
+  if (offset >= text.length) {
+    return null;
+  }
+  
+  // Move backwards to find the start of the word
+  let start = offset;
+  while (start > 0 && !/\s/.test(text[start - 1])) {
+    start--;
+  }
+  
+  // Move forwards to find the end of the word
+  let end = offset;
+  while (end < text.length && !/\s/.test(text[end])) {
+    end++;
+  }
+  
+  return { start, end };
+}
+
+// Helper function to find an element by its attribute value
+function findElementByAttribute(selector, attribute, value) {
+  if (!value) return null;
+  
+  const elements = document.querySelectorAll(selector);
+  for (const element of elements) {
+    if (element.getAttribute(attribute) === value || element[attribute] === value) {
+      return element;
+    }
+  }
+  return null;
+}
+
+// Helper function to find a good text element to start reading from
+function findTextElementAtPosition() {
+  // Look for text elements with a reasonable amount of content
+  const textElements = Array.from(document.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, td, div, span'))
+    .filter(el => {
+      const text = el.innerText || el.textContent;
+      return text && text.trim().length > 10 && el.offsetParent !== null; // Visible elements with enough text
+    });
+  
+  if (textElements.length === 0) return null;
+  
+  // Try to find the first good paragraph element (likely to be content)
+  const paragraphs = textElements.filter(el => el.tagName.toLowerCase() === 'p');
+  if (paragraphs.length > 0) {
+    return paragraphs[0];
+  }
+  
+  // Otherwise return the first text element
+  return textElements[0];
 }
 
 
