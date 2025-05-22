@@ -1,5 +1,7 @@
 # Vibe Reader Chrome Extension
 
+# TO BE _PERFECTLY_ CLEAR, this was written by an AI slopmachine, not me. i just told it what to do, and how very often it was wrong. It's not awful for 4 and a bit hours effort though.
+
 A speed reading Chrome extension that enhances your reading experience with a clean, focused interface.
 
 ## Structure
